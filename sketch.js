@@ -1,53 +1,43 @@
 // ============================================================
-// Week 5 Example 3 — Maze with Animated Character and Stars
+// Week 5 — Prince Charming Maze!
 // ============================================================
-// Updated version featuring:
-//   - New Avatar Sprite Sheet Configuration
-//   - Golden Star Collectibles (Replacing Coins)
-//   - A hardcoded maze drawn with shapes
-//   - Wall collision and exit unlock mechanics
-// ============================================================
-
-// ------------------------------------------------------------
-// SPRITE CONFIGURATION — Walking Character
-// Updated for your new avatar. Adjust these dimensions/rows
-// to match your specific new sprite sheet layout.
-// ------------------------------------------------------------
 const SPRITE = {
-  frameWidth: 75, // Change to your new avatar's frame width
-  frameHeight: 150, // Change to your new avatar's frame height
-  numFrames: 4, // Number of frames in your walking loops
-  animSpeed: 20, // Animation playback speed
-  scale: 0.5, // Scale factor on screen
+  frameWidth: 75, // Width of a single character animation slice
+  frameHeight: 150, // Height of a single character animation slice
+  numFrames: 4, // Active frames per directional strip
+  animSpeed: 20, // Render loop frames per step (higher = slower)
+  scale: 0.4, // Scaled down safely to negotiate 50px corridors
+
   rows: {
-    down: 0, // Row index for facing down
-    up: 1, // Row index for facing up
-    right: 2, // Row index for facing right
-    left: 3, // Row index for facing left
+    down: 0,
+    up: 1,
+    right: 2,
+    left: 3,
   },
+
   offsets: {
     down: { x: 0, y: 0 },
     up: { x: 0, y: 0 },
-    right: { x: 0, y: 0 },
-    left: { x: 0, y: 0 },
+    right: { x: 0, y: 10 },
+    left: { x: 0, y: 20 },
   },
 };
 
 // ------------------------------------------------------------
-// STAR CONFIGURATION
-// Updated for the new horizontal golden star sprite sheet.
+// COIN CONFIGURATION — Blue Coin
 // ------------------------------------------------------------
-const STAR = {
-  frameWidth: 64, // Adjusted for a typical 64x64 star asset
-  frameHeight: 64,
-  numFrames: 6, // Adjusted for a 6-frame spinning cycle
-  animSpeed: 6,
-  scale: 0.6, // Scaled down to fit nicely inside 50px tiles
+const COIN = {
+  frameWidth: 32, // 256px wide sheet / 8 frames
+  frameHeight: 32, // Single row height boundary
+  numFrames: 8, // Full rotation cycle frame count
+  animSpeed: 6, // Rotational update frequency (lower = faster)
+  scale: 1.2, // Scaled to fit comfortably inside a tile
 };
 
 // ------------------------------------------------------------
-// MAZE CONFIGURATION
-// Tile values: 0=floor, 1=wall, 2=start, 3=star, 4=exit
+// MAZE GRID SETUP
+// 0 = Walkable Floor | 1 = Solid Wall | 2 = Player Spawn
+// 3 = Blue Coin Node | 4 = Locked Exit Gateway
 // ------------------------------------------------------------
 const TILE_SIZE = 50;
 
@@ -65,59 +55,52 @@ const MAZE = [
 ];
 
 const TILE_COLORS = {
-  0: [40, 40, 50], // floor — dark grey
-  1: [80, 60, 100], // wall  — purple-grey
-  2: [40, 40, 50], // start — same as floor
-  3: [40, 40, 50], // star  — same as floor (star drawn on top)
-  4: [60, 100, 80], // exit  — green tint when locked
+  0: [40, 40, 50], // Floor
+  1: [173, 216, 230], // Light-blue maze walls
+  2: [40, 40, 50], // Floor color beneath spawn
+  3: [40, 40, 50], // Floor color beneath items
+  4: [60, 100, 80], // Exit color when locked
 };
 
 // ------------------------------------------------------------
-// PLAYER STATE
+// ENTITY VARIABLES
 // ------------------------------------------------------------
 let player = {
   x: 0,
   y: 0,
-  speed: 2,
+  speed: 2.5,
 
   currentFrame: 0,
   frameTimer: 0,
   direction: "down",
   isMoving: false,
 
-  // Hitbox parameters: Adjust these if your new avatar clips into walls
+  // Tighter collision mask dimensions to optimize turning in corridors
   hw: 12,
   hh: 12,
 };
 
-// ------------------------------------------------------------
-// COLLECTIBLES & GAME STATE
-// ------------------------------------------------------------
-let stars = [];
-let starsCollected = 0;
+let coins = [];
+let coinsCollected = 0;
 let gameWon = false;
 
-// Images
 let characterSheet;
-let starSheet;
+let coinSheet;
 
 // ============================================================
-// preload()
+// RUNTIME FUNCTIONS
 // ============================================================
+
 function preload() {
-  // Loaded your new updated images here
-  characterSheet = loadImage("assets/images/your_new_avatar.png");
-  starSheet = loadImage("assets/images/golden_star.png");
+  characterSheet = loadImage("assets/images/prince_charming.png");
+  coinSheet = loadImage("assets/images/blue_coin.png");
 }
 
-// ============================================================
-// setup()
-// ============================================================
 function setup() {
   createCanvas(TILE_SIZE * MAZE[0].length, TILE_SIZE * MAZE.length);
   imageMode(CENTER);
 
-  // Scan maze for start position and star locations
+  // Parse maze layout array to assign spawning spots and build object lists
   for (let row = 0; row < MAZE.length; row++) {
     for (let col = 0; col < MAZE[row].length; col++) {
       let tile = MAZE[row][col];
@@ -128,10 +111,10 @@ function setup() {
       }
 
       if (tile === 3) {
-        stars.push({
+        coins.push({
           x: col * TILE_SIZE + TILE_SIZE / 2,
           y: row * TILE_SIZE + TILE_SIZE / 2,
-          frame: floor(random(STAR.numFrames)), // Desynchronize spins
+          frame: floor(random(COIN.numFrames)), // Desynchronizes coin spins
           frameTimer: 0,
           collected: false,
         });
@@ -140,18 +123,15 @@ function setup() {
   }
 }
 
-// ============================================================
-// draw()
-// ============================================================
 function draw() {
   background(20);
 
   drawMaze();
-  updateStars();
-  drawStars();
+  updateCoins();
+  drawCoins();
   handleInput();
   resolveWallCollisions();
-  checkStarCollection();
+  checkCoinCollection();
   checkExit();
   animateSprite();
   drawCharacter();
@@ -163,7 +143,7 @@ function draw() {
 }
 
 // ------------------------------------------------------------
-// SYSTEMS & RENDERING FUNCTIONS
+// MAZE & COIN LOGIC
 // ------------------------------------------------------------
 
 function drawMaze() {
@@ -175,10 +155,10 @@ function drawMaze() {
       let tile = MAZE[row][col];
 
       if (tile === 4) {
-        if (starsCollected === stars.length) {
-          fill(30, 200, 120); // bright green — open
+        if (coinsCollected === coins.length) {
+          fill(30, 200, 120); // Bright green open state
         } else {
-          fill(60, 100, 80); // dim green — locked
+          fill(255, 255, 224); // Light yellow locked state
         }
       } else {
         let c = TILE_COLORS[tile];
@@ -190,40 +170,45 @@ function drawMaze() {
   }
 }
 
-function updateStars() {
-  for (let i = 0; i < stars.length; i++) {
-    if (stars[i].collected) continue;
+function updateCoins() {
+  for (let i = 0; i < coins.length; i++) {
+    if (coins[i].collected) continue;
 
-    stars[i].frameTimer++;
-    if (stars[i].frameTimer >= STAR.animSpeed) {
-      stars[i].frameTimer = 0;
-      stars[i].frame = (stars[i].frame + 1) % STAR.numFrames;
+    coins[i].frameTimer++;
+    if (coins[i].frameTimer >= COIN.animSpeed) {
+      coins[i].frameTimer = 0;
+      coins[i].frame = (coins[i].frame + 1) % COIN.numFrames;
     }
   }
 }
 
-function drawStars() {
-  for (let i = 0; i < stars.length; i++) {
-    if (stars[i].collected) continue;
+function drawCoins() {
+  for (let i = 0; i < coins.length; i++) {
+    if (coins[i].collected) continue;
 
-    let star = stars[i];
-    let sx = star.frame * STAR.frameWidth;
-    let dw = STAR.frameWidth * STAR.scale;
-    let dh = STAR.frameHeight * STAR.scale;
+    let coin = coins[i];
+
+    let sx = coin.frame * COIN.frameWidth;
+    let dw = COIN.frameWidth * COIN.scale;
+    let dh = COIN.frameHeight * COIN.scale;
 
     image(
-      starSheet,
-      star.x,
-      star.y,
+      coinSheet,
+      coin.x,
+      coin.y,
       dw,
       dh,
       sx,
       0,
-      STAR.frameWidth,
-      STAR.frameHeight,
+      COIN.frameWidth,
+      COIN.frameHeight,
     );
   }
 }
+
+// ------------------------------------------------------------
+// PLAYER CONTROLS & PHYSICS
+// ------------------------------------------------------------
 
 function handleInput() {
   if (gameWon) return;
@@ -231,25 +216,25 @@ function handleInput() {
   player.isMoving = false;
 
   if (keyIsDown(87)) {
-    // W — up
+    // W — Up
     player.y -= player.speed;
     player.direction = "up";
     player.isMoving = true;
   }
   if (keyIsDown(83)) {
-    // S — down
+    // S — Down
     player.y += player.speed;
     player.direction = "down";
     player.isMoving = true;
   }
   if (keyIsDown(65)) {
-    // A — left
+    // A — Left
     player.x -= player.speed;
     player.direction = "left";
     player.isMoving = true;
   }
   if (keyIsDown(68)) {
-    // D — right
+    // D — Right
     player.x += player.speed;
     player.direction = "right";
     player.isMoving = true;
@@ -258,10 +243,10 @@ function handleInput() {
 
 function resolveWallCollisions() {
   let corners = [
-    { x: player.x - player.hw, y: player.y - player.hh }, // top left
-    { x: player.x + player.hw, y: player.y - player.hh }, // top right
-    { x: player.x - player.hw, y: player.y + player.hh }, // bottom left
-    { x: player.x + player.hw, y: player.y + player.hh }, // bottom right
+    { x: player.x - player.hw, y: player.y - player.hh }, // Top-Left
+    { x: player.x + player.hw, y: player.y - player.hh }, // Top-Right
+    { x: player.x - player.hw, y: player.y + player.hh }, // Bottom-Left
+    { x: player.x + player.hw, y: player.y + player.hh }, // Bottom-Right
   ];
 
   for (let i = 0; i < corners.length; i++) {
@@ -298,20 +283,20 @@ function resolveWallCollisions() {
   }
 }
 
-function checkStarCollection() {
-  for (let i = 0; i < stars.length; i++) {
-    if (stars[i].collected) continue;
+function checkCoinCollection() {
+  for (let i = 0; i < coins.length; i++) {
+    if (coins[i].collected) continue;
 
-    let d = dist(player.x, player.y, stars[i].x, stars[i].y);
+    let d = dist(player.x, player.y, coins[i].x, coins[i].y);
     if (d < TILE_SIZE * 0.6) {
-      stars[i].collected = true;
-      starsCollected++;
+      coins[i].collected = true;
+      coinsCollected++;
     }
   }
 }
 
 function checkExit() {
-  if (starsCollected < stars.length) return;
+  if (coinsCollected < coins.length) return;
 
   for (let row = 0; row < MAZE.length; row++) {
     for (let col = 0; col < MAZE[row].length; col++) {
@@ -325,6 +310,10 @@ function checkExit() {
     }
   }
 }
+
+// ------------------------------------------------------------
+// RENDER & ANIMATION RENDERING
+// ------------------------------------------------------------
 
 function animateSprite() {
   if (player.isMoving) {
@@ -346,6 +335,7 @@ function drawCharacter() {
 
   let sx = player.currentFrame * SPRITE.frameWidth + offset.x;
   let sy = row * SPRITE.frameHeight + offset.y;
+
   let dw = SPRITE.frameWidth * SPRITE.scale;
   let dh = SPRITE.frameHeight * SPRITE.scale;
 
@@ -368,11 +358,11 @@ function drawHUD() {
   textSize(14);
   textAlign(LEFT);
   textFont("monospace");
-  text("Stars: " + starsCollected + " / " + stars.length, 10, 20);
+  text("Blue Coins: " + coinsCollected + " / " + coins.length, 10, 20);
 
-  if (starsCollected === stars.length) {
+  if (coinsCollected === coins.length) {
     fill(30, 200, 120);
-    text("Exit is open! Find the green tile.", 10, 40);
+    text("Gateway Unlocked! Locate the green clearing.", 10, 40);
   }
 }
 
@@ -384,9 +374,9 @@ function drawWinScreen() {
   fill(255);
   textAlign(CENTER);
   textSize(48);
-  text("You Escaped!", width / 2, height / 2 - 20);
+  text("Stage Cleared!", width / 2, height / 2 - 20);
 
   textSize(16);
   fill(180);
-  text("All stars collected", width / 2, height / 2 + 20);
+  text("Prince Charming escaped safely.", width / 2, height / 2 + 20);
 }
